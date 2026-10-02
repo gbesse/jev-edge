@@ -1,0 +1,8 @@
+{
+  "modalities": ["text"],
+  "questionTypes": ["choice"],
+  "probabilities": true,
+  "maxMemoryMiB": 8192,
+  "maxCalibrationEce": 0.1,
+  "tags": ["private"]
+}

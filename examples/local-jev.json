@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "local-jev",
+  "model": "my-local-decision-model",
+  "runtime": "vllm",
+  "endpoint": "http://127.0.0.1:8000",
+  "adapter": "open-decision",
+  "modalities": ["text"],
+  "questionTypes": ["choice", "boolean"],
+  "probabilities": true,
+  "memoryMiB": 4096,
+  "calibrationEce": 0.04,
+  "tags": ["private", "cpu"]
+}

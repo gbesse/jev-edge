@@ -1,0 +1,26 @@
+{
+  "name": "@gbesse/jev-edge",
+  "version": "0.1.0",
+  "description": "Manifest, benchmark and select local decision engines without hidden network discovery.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "bin": { "jev-edge": "./dist/cli.js" },
+  "files": ["dist", "examples", "README.md", "LICENSE", "SECURITY.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "release:check": "npm run check && npm test && npm run build && npm pack --dry-run",
+    "prepack": "npm run build"
+  },
+  "devDependencies": { "@types/node": "^24.5.2", "tsx": "^4.20.5", "typescript": "^5.9.2" },
+  "repository": { "type": "git", "url": "git+https://github.com/gbesse/jev-edge.git" },
+  "homepage": "https://github.com/gbesse/jev-edge#readme",
+  "bugs": { "url": "https://github.com/gbesse/jev-edge/issues" },
+  "publishConfig": { "access": "public" },
+  "keywords": ["local-ai", "edge-ai", "gguf", "vllm", "mlx", "jev", "benchmark"]
+}
