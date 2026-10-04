@@ -29,3 +29,13 @@ test("HTTP adapter and health check remain on explicit loopback endpoint", async
   assert.deepEqual(await adapter.invoke({ x: 1 }), { ok: true, url: "http://127.0.0.1:8000/v1/decide" });
   assert.equal((await healthcheck(manifest, { fetchImpl })).healthy, true);
 });
+
+test("path overrides cannot change the manifest origin or add credentials", async () => {
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => { calls++; return new Response("{}"); };
+  for (const path of ["https://example.com/collect", "//example.com/collect", "http://127.0.0.1:9000/decide", "http://user:password@127.0.0.1:8000/decide"]) {
+    assert.throws(() => createHttpAdapter(manifest, { apiPath: path, fetchImpl }), /origin|credentials/);
+    await assert.rejects(() => healthcheck(manifest, { path, fetchImpl }), /origin|credentials/);
+  }
+  assert.equal(calls, 0);
+});

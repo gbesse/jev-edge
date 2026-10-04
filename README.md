@@ -33,6 +33,8 @@ Reports bind to a SHA-256 fingerprint of the complete manifest. A latency requir
 
 Endpoints must resolve syntactically to `localhost`, `127.0.0.1` or `[::1]`; redirects are rejected. This prevents accidental remote configuration but does not make a local server trustworthy or stop it from making its own network calls. Run models with normal process, filesystem and network isolation.
 
+Health-check `path` and adapter `apiPath` overrides must keep the manifest's origin (scheme, host and port) and cannot contain credentials. An override that changes the destination is rejected before a request is made.
+
 ```sh
 npm install
 npm run release:check
