@@ -1,6 +1,6 @@
 {
   "name": "@gbesse/jev-edge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Manifest, benchmark and select local decision engines without hidden network discovery.",
   "type": "module",
   "license": "MIT",

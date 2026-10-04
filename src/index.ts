@@ -46,6 +46,55 @@ export interface BenchmarkReport {
 
 export interface EdgeAdapter { invoke(input: unknown, options?: { signal?: AbortSignal }): Promise<unknown>; }
 
+export interface DecisionProbe {
+  id: string;
+  probabilities: Record<string, number>;
+  expected?: string;
+}
+
+export interface VerificationRun {
+  model: string;
+  runtime: string;
+  precision?: string;
+  artifactSha256?: string;
+  probes: DecisionProbe[];
+}
+
+export interface VerificationThresholds {
+  maxArgmaxFlipRate?: number;
+  maxProbabilityDelta?: number;
+  maxEceDelta?: number;
+  requireExactLabels?: boolean;
+}
+
+export interface VerificationReport {
+  schemaVersion: 1;
+  passed: boolean;
+  reference: { model: string; runtime: string; precision?: string; artifactSha256?: string };
+  candidate: { model: string; runtime: string; precision?: string; artifactSha256?: string };
+  probes: number;
+  argmaxFlips: number;
+  argmaxFlipRate: number;
+  maxProbabilityDelta: number;
+  meanProbabilityDelta: number;
+  referenceEce: number | null;
+  candidateEce: number | null;
+  eceDelta: number | null;
+  failures: string[];
+  fingerprint: string;
+}
+
+export interface VerificationAttestation {
+  schemaVersion: 1;
+  createdAt: string;
+  verifier: "@gbesse/jev-edge";
+  reportFingerprint: string;
+  passed: boolean;
+  referenceArtifactSha256?: string;
+  candidateArtifactSha256?: string;
+  attestationFingerprint: string;
+}
+
 function assert(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
 function percentile(sorted: number[], fraction: number): number { return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * fraction) - 1))]!; }
 function round(value: number): number { return Math.round(value * 100) / 100; }
@@ -161,4 +210,94 @@ export async function loadManifest(path: string): Promise<EngineManifest> {
   const manifest = JSON.parse(await readFile(path, "utf8")) as EngineManifest;
   validateManifest(manifest);
   return manifest;
+}
+
+function validateProbabilityMap(probabilities: Record<string, number>, context: string): void {
+  const values = Object.values(probabilities);
+  assert(values.length >= 2, `${context}: at least two labels are required`);
+  assert(values.every(value => Number.isFinite(value) && value >= 0 && value <= 1), `${context}: invalid probability`);
+  assert(Math.abs(values.reduce((sum, value) => sum + value, 0) - 1) <= .001, `${context}: probabilities must sum to one`);
+}
+
+function argmax(probabilities: Record<string, number>): string {
+  return Object.entries(probabilities).sort(([labelA, valueA], [labelB, valueB]) => valueB - valueA || labelA.localeCompare(labelB))[0]![0];
+}
+
+function calibrationEce(probes: DecisionProbe[]): number | null {
+  const labelled = probes.filter(probe => probe.expected !== undefined);
+  if (!labelled.length) return null;
+  const bins = Array.from({ length: 10 }, () => ({ confidence: 0, correct: 0, count: 0 }));
+  for (const probe of labelled) {
+    const winner = argmax(probe.probabilities);
+    const confidence = probe.probabilities[winner]!;
+    const bin = bins[Math.min(9, Math.floor(confidence * 10))]!;
+    bin.confidence += confidence;
+    bin.correct += winner === probe.expected ? 1 : 0;
+    bin.count++;
+  }
+  return round(bins.reduce((ece, bin) => bin.count ? ece + (bin.count / labelled.length) * Math.abs(bin.correct / bin.count - bin.confidence / bin.count) : ece, 0));
+}
+
+export function verifyDecisionParity(reference: VerificationRun, candidate: VerificationRun, thresholds: VerificationThresholds = {}): VerificationReport {
+  assert(reference.probes.length > 0, "Reference run has no probes");
+  const candidateById = new Map(candidate.probes.map(probe => [probe.id, probe]));
+  assert(candidateById.size === candidate.probes.length, "Candidate probe IDs must be unique");
+  const deltas: number[] = [];
+  let flips = 0;
+  for (const probe of reference.probes) {
+    validateProbabilityMap(probe.probabilities, `reference:${probe.id}`);
+    const compared = candidateById.get(probe.id);
+    assert(compared, `Candidate is missing probe: ${probe.id}`);
+    validateProbabilityMap(compared.probabilities, `candidate:${probe.id}`);
+    const referenceLabels = Object.keys(probe.probabilities).sort();
+    const candidateLabels = Object.keys(compared.probabilities).sort();
+    if (thresholds.requireExactLabels !== false) assert(JSON.stringify(referenceLabels) === JSON.stringify(candidateLabels), `${probe.id}: label sets differ`);
+    if (argmax(probe.probabilities) !== argmax(compared.probabilities)) flips++;
+    for (const label of new Set([...referenceLabels, ...candidateLabels])) deltas.push(Math.abs((probe.probabilities[label] ?? 0) - (compared.probabilities[label] ?? 0)));
+  }
+  assert(candidate.probes.length === reference.probes.length, "Candidate has additional probes");
+  const flipRate = flips / reference.probes.length;
+  const maxDelta = Math.max(...deltas);
+  const meanDelta = deltas.reduce((sum, value) => sum + value, 0) / deltas.length;
+  const referenceEce = calibrationEce(reference.probes);
+  const candidateEce = calibrationEce(candidate.probes);
+  const eceDelta = referenceEce === null || candidateEce === null ? null : candidateEce - referenceEce;
+  const limits = { maxArgmaxFlipRate: thresholds.maxArgmaxFlipRate ?? 0, maxProbabilityDelta: thresholds.maxProbabilityDelta ?? .02, maxEceDelta: thresholds.maxEceDelta ?? .02 };
+  const failures: string[] = [];
+  if (flipRate > limits.maxArgmaxFlipRate) failures.push(`argmax flip rate ${round(flipRate)} exceeds ${limits.maxArgmaxFlipRate}`);
+  if (maxDelta > limits.maxProbabilityDelta) failures.push(`maximum probability delta ${round(maxDelta)} exceeds ${limits.maxProbabilityDelta}`);
+  if (eceDelta !== null && eceDelta > limits.maxEceDelta) failures.push(`ECE regression ${round(eceDelta)} exceeds ${limits.maxEceDelta}`);
+  const core = {
+    schemaVersion: 1 as const,
+    passed: failures.length === 0,
+    reference: { model: reference.model, runtime: reference.runtime, ...(reference.precision ? { precision: reference.precision } : {}), ...(reference.artifactSha256 ? { artifactSha256: reference.artifactSha256 } : {}) },
+    candidate: { model: candidate.model, runtime: candidate.runtime, ...(candidate.precision ? { precision: candidate.precision } : {}), ...(candidate.artifactSha256 ? { artifactSha256: candidate.artifactSha256 } : {}) },
+    probes: reference.probes.length,
+    argmaxFlips: flips,
+    argmaxFlipRate: round(flipRate),
+    maxProbabilityDelta: round(maxDelta),
+    meanProbabilityDelta: round(meanDelta),
+    referenceEce,
+    candidateEce,
+    eceDelta: eceDelta === null ? null : round(eceDelta),
+    failures,
+  };
+  return { ...core, fingerprint: fingerprint(core) };
+}
+
+export async function sha256File(path: string): Promise<string> {
+  return createHash("sha256").update(await readFile(path)).digest("hex");
+}
+
+export function createVerificationAttestation(report: VerificationReport, createdAt = new Date().toISOString()): VerificationAttestation {
+  const core = {
+    schemaVersion: 1 as const,
+    createdAt,
+    verifier: "@gbesse/jev-edge" as const,
+    reportFingerprint: report.fingerprint,
+    passed: report.passed,
+    ...(report.reference.artifactSha256 ? { referenceArtifactSha256: report.reference.artifactSha256 } : {}),
+    ...(report.candidate.artifactSha256 ? { candidateArtifactSha256: report.candidate.artifactSha256 } : {}),
+  };
+  return { ...core, attestationFingerprint: fingerprint(core) };
 }
