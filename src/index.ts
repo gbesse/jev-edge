@@ -67,6 +67,14 @@ export function validateManifest(manifest: EngineManifest): void {
   if (manifest.calibrationEce !== undefined) assert(manifest.calibrationEce >= 0 && manifest.calibrationEce <= 1, "calibrationEce must be between zero and one");
 }
 
+function endpointPath(manifest: EngineManifest, path: string): URL {
+  const endpoint = new URL(manifest.endpoint);
+  const url = new URL(path, endpoint);
+  assert(url.origin === endpoint.origin, "path must remain on the manifest endpoint origin");
+  assert(!url.username && !url.password, "path cannot contain credentials");
+  return url;
+}
+
 export function compatible(manifest: EngineManifest, requirements: EngineRequirements = {}, report?: BenchmarkReport): { compatible: boolean; reasons: string[] } {
   validateManifest(manifest);
   const reasons: string[] = [];
@@ -99,7 +107,7 @@ export function selectEngine(entries: { manifest: EngineManifest; report?: Bench
 export async function healthcheck(manifest: EngineManifest, options: { fetchImpl?: typeof fetch; timeoutMs?: number; path?: string } = {}): Promise<{ healthy: boolean; latencyMs: number; status?: number; error?: string }> {
   validateManifest(manifest);
   const timeoutMs = options.timeoutMs ?? 2_000;
-  const url = new URL(options.path ?? "/health", manifest.endpoint);
+  const url = endpointPath(manifest, options.path ?? "/health");
   const started = performance.now();
   try {
     const response = await (options.fetchImpl ?? fetch)(url, { method: "GET", redirect: "error", signal: AbortSignal.timeout(timeoutMs) });
@@ -111,7 +119,7 @@ export async function healthcheck(manifest: EngineManifest, options: { fetchImpl
 
 export function createHttpAdapter(manifest: EngineManifest, options: { fetchImpl?: typeof fetch; apiPath?: string; encode?: (input: unknown) => unknown; decode?: (payload: unknown) => unknown } = {}): EdgeAdapter {
   validateManifest(manifest);
-  const url = new URL(options.apiPath ?? "/v1/decide", manifest.endpoint);
+  const url = endpointPath(manifest, options.apiPath ?? "/v1/decide");
   const fetchImpl = options.fetchImpl ?? fetch;
   return {
     async invoke(input, call = {}) {
