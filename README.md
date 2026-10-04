@@ -29,6 +29,18 @@ const report = await benchmark(manifest, adapter, cases, {
 
 Reports bind to a SHA-256 fingerprint of the complete manifest. A latency requirement therefore cannot reuse measurements from a changed model or endpoint. Warmup calls are excluded from latency and accuracy.
 
+## Conversion and quantization verification
+
+```sh
+jev-edge verify examples/reference-run.json examples/quantized-run.json
+```
+
+`verify` compares a reference run such as Transformers FP16 with a converted
+or quantized runtime. It fails on argmax changes, excessive probability drift
+or calibration regression and emits a content-addressed attestation suitable
+for CI artifacts. Supply an optional third JSON file to override thresholds.
+The exported `sha256File` helper can bind both runs to their exact artifacts.
+
 ## Security model
 
 Endpoints must resolve syntactically to `localhost`, `127.0.0.1` or `[::1]`; redirects are rejected. This prevents accidental remote configuration but does not make a local server trustworthy or stop it from making its own network calls. Run models with normal process, filesystem and network isolation.

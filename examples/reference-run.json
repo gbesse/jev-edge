@@ -1,0 +1,9 @@
+{
+  "model": "example-decision-model",
+  "runtime": "transformers",
+  "precision": "fp16",
+  "probes": [
+    { "id": "safe-read", "expected": "allow", "probabilities": { "allow": 0.91, "deny": 0.09 } },
+    { "id": "destructive-command", "expected": "deny", "probabilities": { "allow": 0.04, "deny": 0.96 } }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "model": "example-decision-model",
+  "runtime": "llama.cpp-b11361",
+  "precision": "q4_k_m",
+  "probes": [
+    { "id": "safe-read", "expected": "allow", "probabilities": { "allow": 0.90, "deny": 0.10 } },
+    { "id": "destructive-command", "expected": "deny", "probabilities": { "allow": 0.05, "deny": 0.95 } }
+  ]
+}

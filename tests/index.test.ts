@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { benchmark, compatible, createHttpAdapter, healthcheck, selectEngine, validateManifest, type EngineManifest } from "../src/index.js";
+import { benchmark, compatible, createHttpAdapter, createVerificationAttestation, healthcheck, selectEngine, validateManifest, verifyDecisionParity, type EngineManifest, type VerificationRun } from "../src/index.js";
 
 const manifest: EngineManifest = { schemaVersion: 1, id: "local-jev", model: "fixture", runtime: "vllm", endpoint: "http://127.0.0.1:8000", adapter: "open-decision", modalities: ["text"], questionTypes: ["choice", "boolean"], probabilities: true, memoryMiB: 2048, calibrationEce: .03 };
 
@@ -38,4 +38,26 @@ test("path overrides cannot change the manifest origin or add credentials", asyn
     await assert.rejects(() => healthcheck(manifest, { path, fetchImpl }), /origin|credentials/);
   }
   assert.equal(calls, 0);
+});
+
+test("verification detects argmax flips and calibration drift", () => {
+  const reference: VerificationRun = { model: "fixture", runtime: "python", precision: "fp16", probes: [
+    { id: "a", expected: "allow", probabilities: { allow: .9, deny: .1 } },
+    { id: "b", expected: "deny", probabilities: { allow: .1, deny: .9 } },
+  ] };
+  const candidate: VerificationRun = { ...reference, runtime: "llama.cpp", precision: "q4", probes: [
+    { id: "a", expected: "allow", probabilities: { allow: .4, deny: .6 } },
+    { id: "b", expected: "deny", probabilities: { allow: .12, deny: .88 } },
+  ] };
+  const report = verifyDecisionParity(reference, candidate);
+  assert.equal(report.passed, false);
+  assert.equal(report.argmaxFlips, 1);
+  assert.match(report.failures.join(" "), /argmax/);
+  assert.equal(createVerificationAttestation(report, "2026-10-04T00:00:00.000Z").reportFingerprint, report.fingerprint);
+});
+
+test("verification passes within explicit conversion tolerances", () => {
+  const reference: VerificationRun = { model: "fixture", runtime: "python", probes: [{ id: "a", probabilities: { yes: .8, no: .2 } }] };
+  const candidate: VerificationRun = { model: "fixture", runtime: "llama.cpp", probes: [{ id: "a", probabilities: { yes: .79, no: .21 } }] };
+  assert.equal(verifyDecisionParity(reference, candidate, { maxProbabilityDelta: .011 }).passed, true);
 });
