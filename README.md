@@ -53,3 +53,7 @@ npm run release:check
 ```
 
 MIT licensed. Jev Edge is independent of model and runtime vendors.
+
+## Contrôle d’adoption · Adoption check · Comprobación de adopción
+
+[Français : essayer un cas synthétique](examples/adoption-check.md) · [English: try a synthetic case](examples/adoption-check.md) · [Español: pruebe un caso sintético](examples/adoption-check.md).
