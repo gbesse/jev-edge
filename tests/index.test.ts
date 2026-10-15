@@ -82,3 +82,10 @@ test('full probes and resolved thresholds bind parity report fingerprints',()=>{
  const first=verifyDecisionParity(a,a),second=verifyDecisionParity(b,b);
  assert.notEqual(first.fingerprint,second.fingerprint);assert.equal(first.thresholds.maxArgmaxFlipRate,0);
 });
+
+test('sub-percent calibration regressions cannot disappear through display rounding',()=>{
+ const reference:VerificationRun={model:'fixture',runtime:'reference',probes:[{id:'one',expected:'yes',probabilities:{yes:.9,no:.1}}]};
+ const candidate:VerificationRun={...reference,probes:[{id:'one',expected:'yes',probabilities:{yes:.8985,no:.1015}}]};
+ const report=verifyDecisionParity(reference,candidate,{maxProbabilityDelta:.01,maxEceDelta:.001});
+ assert.equal(report.passed,false);assert.equal(report.eceDelta,.0015);
+});

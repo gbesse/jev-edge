@@ -192,7 +192,7 @@ export function createHttpAdapter(manifest: EngineManifest, options: { fetchImpl
 export async function benchmark(manifest: EngineManifest, adapter: EdgeAdapter, cases: BenchmarkCase[], options: { warmupRuns?: number; runs?: number; timeoutMs?: number; judge?: (output: unknown, expected: string) => boolean } = {}): Promise<BenchmarkReport> {
   validateManifest(manifest);
   manifest = structuredClone(manifest); cases = structuredClone(cases);
-  assert(Array.isArray(cases) && cases.length > 0 && cases.length <= 10000 && new Set(cases.map(item=>item.id)).size === cases.length,
+  assert(Array.isArray(cases) && cases.length > 0 && cases.length <= 10000 && cases.every(item=>typeof item.id==='string'&&item.id.trim()) && new Set(cases.map(item=>item.id)).size === cases.length,
     "FR : cas de benchmark non vides et uniques requis. EN: nonempty unique benchmark cases required. ES: se requieren casos no vacíos y únicos.");
   const warmupRuns = options.warmupRuns ?? 1;
   const runs = options.runs ?? 3;
@@ -261,7 +261,7 @@ function calibrationEce(probes: DecisionProbe[]): number | null {
     bin.correct += winner === probe.expected ? 1 : 0;
     bin.count++;
   }
-  return round(bins.reduce((ece, bin) => bin.count ? ece + (bin.count / labelled.length) * Math.abs(bin.correct / bin.count - bin.confidence / bin.count) : ece, 0));
+  return bins.reduce((ece, bin) => bin.count ? ece + (bin.count / labelled.length) * Math.abs(bin.correct / bin.count - bin.confidence / bin.count) : ece, 0);
 }
 
 export function verifyDecisionParity(reference: VerificationRun, candidate: VerificationRun, thresholds: VerificationThresholds = {}): VerificationReport {
@@ -292,10 +292,11 @@ export function verifyDecisionParity(reference: VerificationRun, candidate: Veri
   const referenceEce = calibrationEce(reference.probes);
   const candidateEce = calibrationEce(candidate.probes);
   const eceDelta = referenceEce === null || candidateEce === null ? null : candidateEce - referenceEce;
+  const probabilityRound = (value: number) => Math.round(value * 1e6) / 1e6;
   const failures: string[] = [];
-  if (flipRate > limits.maxArgmaxFlipRate) failures.push(`argmax flip rate ${round(flipRate)} exceeds ${limits.maxArgmaxFlipRate}`);
-  if (maxDelta > limits.maxProbabilityDelta) failures.push(`maximum probability delta ${round(maxDelta)} exceeds ${limits.maxProbabilityDelta}`);
-  if (eceDelta !== null && eceDelta > limits.maxEceDelta) failures.push(`ECE regression ${round(eceDelta)} exceeds ${limits.maxEceDelta}`);
+  if (flipRate > limits.maxArgmaxFlipRate) failures.push(`argmax flip rate ${probabilityRound(flipRate)} exceeds ${limits.maxArgmaxFlipRate}`);
+  if (maxDelta > limits.maxProbabilityDelta) failures.push(`maximum probability delta ${probabilityRound(maxDelta)} exceeds ${limits.maxProbabilityDelta}`);
+  if (eceDelta !== null && eceDelta > limits.maxEceDelta) failures.push(`ECE regression ${probabilityRound(eceDelta)} exceeds ${limits.maxEceDelta}`);
   const core = {
     schemaVersion: 1 as const,
     passed: failures.length === 0,
@@ -306,12 +307,12 @@ export function verifyDecisionParity(reference: VerificationRun, candidate: Veri
     thresholds: limits,
     probes: reference.probes.length,
     argmaxFlips: flips,
-    argmaxFlipRate: round(flipRate),
-    maxProbabilityDelta: round(maxDelta),
-    meanProbabilityDelta: round(meanDelta),
-    referenceEce,
-    candidateEce,
-    eceDelta: eceDelta === null ? null : round(eceDelta),
+    argmaxFlipRate: probabilityRound(flipRate),
+    maxProbabilityDelta: probabilityRound(maxDelta),
+    meanProbabilityDelta: probabilityRound(meanDelta),
+    referenceEce: referenceEce === null ? null : probabilityRound(referenceEce),
+    candidateEce: candidateEce === null ? null : probabilityRound(candidateEce),
+    eceDelta: eceDelta === null ? null : probabilityRound(eceDelta),
     failures,
   };
   return { ...core, fingerprint: fingerprint(core) };
