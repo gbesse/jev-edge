@@ -61,3 +61,24 @@ test("verification passes within explicit conversion tolerances", () => {
   const candidate: VerificationRun = { model: "fixture", runtime: "llama.cpp", probes: [{ id: "a", probabilities: { yes: .79, no: .21 } }] };
   assert.equal(verifyDecisionParity(reference, candidate, { maxProbabilityDelta: .011 }).passed, true);
 });
+
+test('latency gates reject nonfinite requirements and measured latencies',async()=>{
+ for(const value of [NaN,Infinity,-1])assert.throws(()=>compatible(manifest,{maxP95Ms:value}),/requirement/);
+ const report=await benchmark(manifest,{invoke:async()=>true},[{id:'one',input:true}],{warmupRuns:0,runs:1});report.latency.p95Ms=NaN;
+ assert.equal(compatible(manifest,{maxP95Ms:100},report).compatible,false);
+});
+test('hard deadline rejects adapters that ignore AbortSignal without dispatching more cases',async()=>{
+ let calls=0;await assert.rejects(benchmark(manifest,{invoke:async()=>{calls++;return new Promise(()=>{});}},[{id:'one',input:1},{id:'two',input:2}],{warmupRuns:0,runs:1,timeoutMs:10}),/deadline/);assert.equal(calls,1);
+});
+test('parity rejects duplicate reference identities nonfinite thresholds and changed truth',()=>{
+ const reference:VerificationRun={model:'fixture',runtime:'reference',probes:[{id:'one',expected:'yes',probabilities:{yes:.9,no:.1}}]};
+ assert.throws(()=>verifyDecisionParity({...reference,probes:[...reference.probes,...reference.probes]},reference),/unique/);
+ assert.throws(()=>verifyDecisionParity(reference,reference,{maxProbabilityDelta:NaN}),/thresholds/);
+ assert.throws(()=>verifyDecisionParity(reference,{...reference,probes:[{...reference.probes[0]!,expected:'no'}]}),/truth/);
+});
+test('full probes and resolved thresholds bind parity report fingerprints',()=>{
+ const a:VerificationRun={model:'fixture',runtime:'reference',probes:[{id:'one',probabilities:{yes:.9,no:.1}}]};
+ const b:VerificationRun={...a,probes:[{id:'other',probabilities:{yes:.9,no:.1}}]};
+ const first=verifyDecisionParity(a,a),second=verifyDecisionParity(b,b);
+ assert.notEqual(first.fingerprint,second.fingerprint);assert.equal(first.thresholds.maxArgmaxFlipRate,0);
+});

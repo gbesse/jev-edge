@@ -82,6 +82,9 @@ export interface VerificationReport {
   eceDelta: number | null;
   failures: string[];
   fingerprint: string;
+  referenceRunFingerprint: string;
+  candidateRunFingerprint: string;
+  thresholds: Required<VerificationThresholds>;
 }
 
 export interface VerificationAttestation {
@@ -126,6 +129,12 @@ function endpointPath(manifest: EngineManifest, path: string): URL {
 
 export function compatible(manifest: EngineManifest, requirements: EngineRequirements = {}, report?: BenchmarkReport): { compatible: boolean; reasons: string[] } {
   validateManifest(manifest);
+  for (const [name, value, maximum] of [
+    ["maxMemoryMiB", requirements.maxMemoryMiB, Infinity],
+    ["maxCalibrationEce", requirements.maxCalibrationEce, 1],
+    ["maxP95Ms", requirements.maxP95Ms, Infinity],
+  ] as const) if(value !== undefined) assert(Number.isFinite(value) && value >= 0 && value <= maximum,
+    `FR : contrainte ${name} invalide. EN: invalid ${name} requirement. ES: requisito ${name} no válido.`);
   const reasons: string[] = [];
   for (const modality of requirements.modalities ?? []) if (!manifest.modalities.includes(modality)) reasons.push(`missing modality:${modality}`);
   for (const type of requirements.questionTypes ?? []) if (!manifest.questionTypes.includes(type)) reasons.push(`missing question:${type}`);
@@ -133,7 +142,7 @@ export function compatible(manifest: EngineManifest, requirements: EngineRequire
   if (requirements.maxMemoryMiB !== undefined && (manifest.memoryMiB === undefined || manifest.memoryMiB > requirements.maxMemoryMiB)) reasons.push("memory budget exceeded or unknown");
   if (requirements.maxCalibrationEce !== undefined && (manifest.calibrationEce === undefined || manifest.calibrationEce > requirements.maxCalibrationEce)) reasons.push("calibration requirement not met");
   for (const tag of requirements.tags ?? []) if (!manifest.tags?.includes(tag)) reasons.push(`missing tag:${tag}`);
-  if (requirements.maxP95Ms !== undefined && (!report || report.engineId !== manifest.id || report.manifestFingerprint !== fingerprint(manifest) || report.latency.p95Ms > requirements.maxP95Ms)) reasons.push("latency requirement not met by a current benchmark");
+  if (requirements.maxP95Ms !== undefined && (!report || report.engineId !== manifest.id || report.manifestFingerprint !== fingerprint(manifest) || !Number.isFinite(report.latency?.p95Ms) || report.latency.p95Ms < 0 || report.latency.p95Ms > requirements.maxP95Ms)) reasons.push("latency requirement not met by a current benchmark");
   return { compatible: reasons.length === 0, reasons };
 }
 
@@ -182,18 +191,35 @@ export function createHttpAdapter(manifest: EngineManifest, options: { fetchImpl
 
 export async function benchmark(manifest: EngineManifest, adapter: EdgeAdapter, cases: BenchmarkCase[], options: { warmupRuns?: number; runs?: number; timeoutMs?: number; judge?: (output: unknown, expected: string) => boolean } = {}): Promise<BenchmarkReport> {
   validateManifest(manifest);
-  assert(cases.length > 0, "At least one benchmark case is required");
+  manifest = structuredClone(manifest); cases = structuredClone(cases);
+  assert(Array.isArray(cases) && cases.length > 0 && cases.length <= 10000 && new Set(cases.map(item=>item.id)).size === cases.length,
+    "FR : cas de benchmark non vides et uniques requis. EN: nonempty unique benchmark cases required. ES: se requieren casos no vacíos y únicos.");
   const warmupRuns = options.warmupRuns ?? 1;
   const runs = options.runs ?? 3;
   const timeoutMs = options.timeoutMs ?? 30_000;
   assert(Number.isInteger(warmupRuns) && warmupRuns >= 0 && Number.isInteger(runs) && runs > 0, "Invalid run counts");
-  for (let index = 0; index < warmupRuns; index++) await adapter.invoke(structuredClone(cases[index % cases.length]!.input), { signal: AbortSignal.timeout(timeoutMs) });
+  assert(warmupRuns <= 1000 && runs <= 1000 && cases.length * runs + warmupRuns <= 1000000 && Number.isInteger(timeoutMs) && timeoutMs >= 1 && timeoutMs <= 300000,
+    "FR : bornes de benchmark invalides. EN: invalid benchmark bounds. ES: límites de benchmark no válidos.");
+  const invoke = async (input: unknown): Promise<unknown> => {
+    const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
+    const deadline = new Promise<never>((_,reject)=>{timer=setTimeout(()=>{
+      const error = new Error("FR : délai de benchmark dépassé. EN: benchmark deadline exceeded. ES: plazo de benchmark superado.");
+      controller.abort(error);reject(error);
+    },timeoutMs);});
+    try { return await Promise.race([Promise.resolve().then(()=>adapter.invoke(structuredClone(input),{signal:controller.signal})),deadline]); }
+    finally { clearTimeout(timer!); }
+  };
+  for (let index = 0; index < warmupRuns; index++) await invoke(cases[index % cases.length]!.input);
   const measurements: BenchmarkMeasurement[] = [];
   for (let run = 0; run < runs; run++) for (const item of cases) {
     const started = performance.now();
-    const output = await adapter.invoke(structuredClone(item.input), { signal: AbortSignal.timeout(timeoutMs) });
+    const output = await invoke(item.input);
     const measurement: BenchmarkMeasurement = { id: item.id, latencyMs: round(performance.now() - started), output };
-    if (item.expected !== undefined && options.judge) measurement.correct = options.judge(output, item.expected);
+    if (item.expected !== undefined && options.judge) {
+      const correct = options.judge(output,item.expected);
+      assert(typeof correct === 'boolean', "FR : juge booléen requis. EN: Boolean judge required. ES: se requiere juez booleano.");
+      measurement.correct = correct;
+    }
     measurements.push(measurement);
   }
   const times = measurements.map(item => item.latencyMs).sort((a, b) => a - b);
@@ -240,6 +266,9 @@ function calibrationEce(probes: DecisionProbe[]): number | null {
 
 export function verifyDecisionParity(reference: VerificationRun, candidate: VerificationRun, thresholds: VerificationThresholds = {}): VerificationReport {
   assert(reference.probes.length > 0, "Reference run has no probes");
+  assert(new Set(reference.probes.map(probe=>probe.id)).size === reference.probes.length, "FR : ID de référence uniques requis. EN: reference IDs must be unique. ES: ID de referencia únicos requeridos.");
+  const limits: Required<VerificationThresholds> = {maxArgmaxFlipRate:thresholds.maxArgmaxFlipRate??0,maxProbabilityDelta:thresholds.maxProbabilityDelta??.02,maxEceDelta:thresholds.maxEceDelta??.02,requireExactLabels:thresholds.requireExactLabels??true};
+  assert(Number.isFinite(limits.maxArgmaxFlipRate)&&limits.maxArgmaxFlipRate>=0&&limits.maxArgmaxFlipRate<=1&&Number.isFinite(limits.maxProbabilityDelta)&&limits.maxProbabilityDelta>=0&&limits.maxProbabilityDelta<=1&&Number.isFinite(limits.maxEceDelta)&&limits.maxEceDelta>=-1&&limits.maxEceDelta<=1&&typeof limits.requireExactLabels==='boolean', "FR : seuils de parité invalides. EN: invalid parity thresholds. ES: umbrales de paridad no válidos.");
   const candidateById = new Map(candidate.probes.map(probe => [probe.id, probe]));
   assert(candidateById.size === candidate.probes.length, "Candidate probe IDs must be unique");
   const deltas: number[] = [];
@@ -249,6 +278,7 @@ export function verifyDecisionParity(reference: VerificationRun, candidate: Veri
     const compared = candidateById.get(probe.id);
     assert(compared, `Candidate is missing probe: ${probe.id}`);
     validateProbabilityMap(compared.probabilities, `candidate:${probe.id}`);
+    assert(probe.expected === compared.expected, "FR : vérité de référence différente. EN: reference truth differs. ES: verdad de referencia distinta.");
     const referenceLabels = Object.keys(probe.probabilities).sort();
     const candidateLabels = Object.keys(compared.probabilities).sort();
     if (thresholds.requireExactLabels !== false) assert(JSON.stringify(referenceLabels) === JSON.stringify(candidateLabels), `${probe.id}: label sets differ`);
@@ -262,7 +292,6 @@ export function verifyDecisionParity(reference: VerificationRun, candidate: Veri
   const referenceEce = calibrationEce(reference.probes);
   const candidateEce = calibrationEce(candidate.probes);
   const eceDelta = referenceEce === null || candidateEce === null ? null : candidateEce - referenceEce;
-  const limits = { maxArgmaxFlipRate: thresholds.maxArgmaxFlipRate ?? 0, maxProbabilityDelta: thresholds.maxProbabilityDelta ?? .02, maxEceDelta: thresholds.maxEceDelta ?? .02 };
   const failures: string[] = [];
   if (flipRate > limits.maxArgmaxFlipRate) failures.push(`argmax flip rate ${round(flipRate)} exceeds ${limits.maxArgmaxFlipRate}`);
   if (maxDelta > limits.maxProbabilityDelta) failures.push(`maximum probability delta ${round(maxDelta)} exceeds ${limits.maxProbabilityDelta}`);
@@ -272,6 +301,9 @@ export function verifyDecisionParity(reference: VerificationRun, candidate: Veri
     passed: failures.length === 0,
     reference: { model: reference.model, runtime: reference.runtime, ...(reference.precision ? { precision: reference.precision } : {}), ...(reference.artifactSha256 ? { artifactSha256: reference.artifactSha256 } : {}) },
     candidate: { model: candidate.model, runtime: candidate.runtime, ...(candidate.precision ? { precision: candidate.precision } : {}), ...(candidate.artifactSha256 ? { artifactSha256: candidate.artifactSha256 } : {}) },
+    referenceRunFingerprint: fingerprint(reference),
+    candidateRunFingerprint: fingerprint(candidate),
+    thresholds: limits,
     probes: reference.probes.length,
     argmaxFlips: flips,
     argmaxFlipRate: round(flipRate),

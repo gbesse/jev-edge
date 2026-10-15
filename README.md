@@ -57,3 +57,11 @@ MIT licensed. Jev Edge is independent of model and runtime vendors.
 ## Contrôle d’adoption · Adoption check · Comprobación de adopción
 
 [Français : essayer un cas synthétique](examples/adoption-check.md) · [English: try a synthetic case](examples/adoption-check.md) · [Español: pruebe un caso sintético](examples/adoption-check.md).
+
+## Finite measurements and complete parity receipts / Mesures finies / Mediciones finitas
+
+EN: Benchmarks now enforce a wall-clock deadline even when adapters ignore AbortSignal, stop further dispatch after failure, snapshot inputs and require Boolean judges. Latency constraints reject nonfinite budgets and cannot pass a NaN measurement. Parity receipts bind full reference/candidate probe fingerprints and resolved thresholds; duplicate reference IDs, nonfinite thresholds and changed truth labels are rejected. Hashes are unsigned consistency records. Cancellation cannot terminate external side effects or synchronous JavaScript; no new real-engine benchmark is claimed.
+
+FR : Les benchmarks appliquent désormais un délai réel même si l’adaptateur ignore AbortSignal, arrêtent les appels après échec, capturent les entrées et exigent des juges booléens. Les contraintes de latence refusent budgets non finis et mesures NaN. Les reçus de parité lient empreintes complètes des sondes et seuils résolus ; ID de référence dupliqués, seuils non finis et vérités modifiées sont refusés. Les hashes sont des contrôles de cohérence non signés. L’annulation n’arrête pas les effets externes ni le JavaScript synchrone ; aucun nouveau benchmark de moteur réel n’est revendiqué.
+
+ES: Benchmarks aplican un plazo real aunque adaptadores ignoren AbortSignal, detienen llamadas tras fallos, capturan entradas y exigen jueces booleanos. Restricciones de latencia rechazan presupuestos no finitos y mediciones NaN. Recibos de paridad vinculan huellas completas de sondas y umbrales resueltos; rechazan ID duplicados, umbrales no finitos y verdades cambiadas. Hashes son controles de consistencia sin firma. Cancelar no detiene efectos externos ni JavaScript síncrono; no afirma benchmarks nuevos de motores reales.
